@@ -1,0 +1,29 @@
+@model RoomModel
+@{
+    ViewData["Title"] = $"Draw online | {Model.RoomID}";
+}
+
+<script type="text/javascript">
+    var roomModel = @Json.Serialize(Model);
+</script>
+
+<div class="container">
+    <div class="row">
+      <div class="col col-9">
+        <canvas id="canvas" height="600" width="800" class="border"></canvas>
+      </div>
+      <div class="col col-3 border p-0">
+        <div id="chat" class="align-end div-chat border h-100" style="word-wrap:break-word;overflow-y:scroll;"><p>Connected to the chatroom.<br></p></div>
+        <div class="row justify-content-md-center">
+            <input class="col-8 p-1 form-control" id="chat-text" type="text">
+            <input class="col-3 p-1 btn btn-primary" value="Send" type="button" onclick="sendChatMessage()">
+        </div>
+      </div>
+    </div>
+</div>
+<img id="img-helper" hidden=true/>
+
+<script src="~/js/signalr/dist/browser/signalr.js"></script>
+<script src="~/js/msgpack5/dist/msgpack5.js"></script>
+<script src="~/js/signalr/dist/browser/signalr-protocol-msgpack.js"></script>
+<script src="~/js/drawing.js"></script>

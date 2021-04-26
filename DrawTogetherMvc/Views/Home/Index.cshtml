@@ -1,0 +1,16 @@
+﻿@{
+    ViewData["Title"] = "Home Page";
+}
+
+<div class="text-center">
+    <h1 class="display-4">Draw together online with friends!</h1>
+    <p>Choose the room name to start drawing and share the URL to invite friend:</p>
+    <form class="row justify-content-center" method="get" action="/draw/room">
+        <div class="col-auto">
+            <input type="text" class="form-control" id="roomName" name="id"></input>
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-primary">Create room</button>
+        </div>
+    </form>
+</div>
