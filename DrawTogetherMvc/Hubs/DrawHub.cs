@@ -100,7 +100,7 @@ namespace DrawTogetherMvc.Hubs
         /// <summary>
         /// The rate at which an image is redrawn server-side.
         /// </summary>
-        private static int _imageRefreshRate = 1000;
+        private static int _imageRefreshRate = 100;
         /// <summary>
         /// ConnectionId of the node.js worker that renders room images server-side.
         /// </summary>
