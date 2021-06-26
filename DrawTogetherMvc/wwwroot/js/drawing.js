@@ -101,11 +101,9 @@ function reloadImage(imageData) {
     console.log("Succesfully resynchronized.");
 }
 
-// called by the browser client
-// receives a continuous stream of events to draw
-function connect() {
+function beginReceiveEvents() {
     connection
-        .stream("Connect", roomID)
+        .stream("ClientBeginReceiveEvents")
         .subscribe({
             next: (event) => {
                 drawLine(event);
@@ -119,12 +117,36 @@ function connect() {
         });
 }
 
+// called by the browser client
+// receives a continuous stream of events to draw
+async function connect() {
+    await connection.invoke("Connect", roomID).catch(function (err) {
+        return console.error(err.toString());
+    });
+    let data = [];
+    connection
+        .stream("SendImageToClient", roomID)
+        .subscribe({
+            next: (event) => {
+                data.push(event);
+            },
+            complete: () => {
+                reloadImage(data.join(''));
+                beginReceiveEvents();
+            },
+            error: (err) => {
+                console.error(err.toString());
+            }
+        });
+}
+
+connection.on("ReceiveChatMessage", receiveChatMessage);
+connection.on("ReloadImage", reloadImage);
+connection.onreconnected(connect);
+
 // start the connection
-connection.start().then(function () {
-    connection.on("ReceiveChatMessage", receiveChatMessage);
-    connection.on("ReloadImage", reloadImage);
-    connection.onreconnected(connect);
-    connect();
+connection.start().then(async function () {
+    await connect();
     canvas.onmousedown = onMouseDown;
     canvas.onmouseup = onMouseUp;
     canvas.onmousemove = onMouseMove;

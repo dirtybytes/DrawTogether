@@ -44,6 +44,17 @@ function reloadImage(imageData) {
     console.log("Reloaded image.");
 }
 
+function sendBackUpdatedImage(room) {
+    let data = canv.toDataURL();
+    const subject = new signalR.Subject();
+    const chunkSize = 5000;
+    connection.send("ReceiveUpdatedImage", room, subject);
+    for (let i = 0; i < data.length; i += chunkSize) {
+        subject.next(data.substring(i, i + chunkSize));
+    }
+    subject.complete();
+}
+
 // called by the asp.net core server to request the updated image
 function renderImage(room) {
     console.log("Image rendering requested.");
@@ -57,9 +68,7 @@ function renderImage(room) {
             },
             complete: () => {
                 console.log("Finished rendering the image, sending it back to the server.");
-                connection.invoke("ReceiveUpdatedImage", room, canv.toDataURL()).catch(function (err) {
-                    return console.error(err.toString());
-                });
+                sendBackUpdatedImage(room);
             },
             error: (err) => {
                 console.error(err.toString());

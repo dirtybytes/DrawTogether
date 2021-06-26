@@ -5,6 +5,7 @@ using System.Web;
 using System.Linq;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Channels;
 using System.Threading;
 
@@ -100,7 +101,7 @@ namespace DrawTogetherMvc.Hubs
         /// <summary>
         /// The rate at which an image is redrawn server-side.
         /// </summary>
-        private static int _imageRefreshRate = 100;
+        private static int _imageRefreshRate = 2000;
         /// <summary>
         /// ConnectionId of the node.js worker that renders room images server-side.
         /// </summary>
@@ -192,7 +193,7 @@ namespace DrawTogetherMvc.Hubs
             if (!roomData.Redrawing && storedEventsCount > _imageRefreshRate)
             {
                 roomData.Redrawing = true;
-                roomData.EventsToTrim += storedEventsCount - _imageRefreshRate * 2;
+                roomData.EventsToTrim += storedEventsCount;
                 _ = Clients.Client(_nodeWorkerID).NodeRenderImage(room);
             }
         }
@@ -243,10 +244,17 @@ namespace DrawTogetherMvc.Hubs
         /// <summary>
         /// A method called by the node.js worker to send back the updated room image data.
         /// </summary>
-        public void ReceiveUpdatedImage(string room, string imageData)
+        public async Task ReceiveUpdatedImage(string room, IAsyncEnumerable<string> imageData)
         {
             var roomData = Room(room);
-            roomData.Image = imageData;
+            var builder = new StringBuilder();
+            await foreach (var s in imageData)
+            {
+                builder.Append(s);
+            }
+            // TODO: maybe put a query string on the image to prevent caching
+            //      (sometimes you have to refresh a page multiple times)
+            roomData.Image = builder.ToString();
             TrimDrawData(room);
         }
         /// <summary>
@@ -287,9 +295,9 @@ namespace DrawTogetherMvc.Hubs
         }
         /// <summary>
         /// A method called by a client when it initiates a connection to the server.
+        /// Initializes the data for the client on the server.
         /// </summary>
-        /// <returns>Readable stream of drawing events to process client-side.</returns>
-        public async Task<ChannelReader<DrawLineEvent>> Connect(string room, CancellationToken cancellationToken)
+        public async Task Connect(string room)
         {
             var connection = AddConnection(Context.ConnectionId, room);
             connection.Room = room;
@@ -299,8 +307,35 @@ namespace DrawTogetherMvc.Hubs
             {
                 await connection.DrawEvents.Writer.WriteAsync(ev);
             }
-            await Clients.Caller.ReloadImage(roomData.Image);
-            return connection.DrawEvents.Reader;
+        }
+        /// <summary>
+        /// Called by a client after it's successfully synchronized an image.
+        /// Returns a stream where DrawLineEvents are pushed in.
+        /// </summary>
+        /// <returns>Readable stream of drawing events to process client-side.</returns>
+        public ChannelReader<DrawLineEvent> ClientBeginReceiveEvents(CancellationToken cancellationToken)
+        {
+            return Connection(Context.ConnectionId).DrawEvents.Reader;
+        }
+        /// <summary>
+        /// Called by a client when it needs to resynchronize the image.
+        /// </summary>
+        /// <param name="roomId">Room identifier</param>
+        /// <returns></returns>
+        public async IAsyncEnumerable<string> SendImageToClient(string roomId)
+        {
+            var image = Room(roomId).Image;
+            int chunkSize = 5000;
+            var imageChunks =
+                Enumerable
+                .Range(0, (image.Length - 1) / chunkSize + 1)
+                .Select(i =>
+                    image.Substring(i * chunkSize, Math.Min(chunkSize, image.Length - i * chunkSize)));
+            foreach (var s in imageChunks)
+            {
+                await Task.Yield();
+                yield return s;
+            }
         }
         #endregion
     }
