@@ -30,12 +30,13 @@ namespace DrawTogetherMvc.Hubs.Tests
         {
         }
         [Test]
-        [TestCase("1", null)]
-        public async Task ConnectTest(string room, CancellationToken cancellationToken)
+        [TestCase("1")]
+        public async Task ConnectTest(string room)
         {
             string connectionId = "mockConnection";
             var hub = CreateTestHub(connectionId);
-            var reader = await hub.Connect(room, cancellationToken);
+            await hub.Connect(room);
+            var reader = DrawHub.Connection(connectionId).DrawEvents.Reader;
             Assert.AreEqual(room, DrawHub.Connection(connectionId).Room);
 
             DrawLineEvent ev1 = new DrawLineEvent
