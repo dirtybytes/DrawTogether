@@ -12,7 +12,6 @@ var connection = new signalR
     .HubConnectionBuilder()
     .withUrl("/hubs/draw-hub")
     .withAutomaticReconnect()
-    .withHubProtocol(new signalR.protocols.msgpack.MessagePackHubProtocol())
     .build();
 
 // drawing-related functions

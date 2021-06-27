@@ -24,7 +24,12 @@ namespace DrawTogetherMvc
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddControllersWithViews().AddRazorRuntimeCompilation();
-            services.AddSignalR().AddMessagePackProtocol();
+            services.AddSignalR()
+                .AddJsonProtocol(options =>
+                {
+                    options.PayloadSerializerOptions.PropertyNamingPolicy = null;
+                    options.PayloadSerializerOptions.IncludeFields = true;
+                });
         }
 
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)

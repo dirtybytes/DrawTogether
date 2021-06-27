@@ -2,8 +2,6 @@
 
 // imports
 const signalR = require("@microsoft/signalr");
-require("msgpack5");
-const signalRMsgPack = require("@microsoft/signalr-protocol-msgpack");
 const canvas = require("canvas");
 
 // canvas for server-side image rendering
@@ -16,7 +14,6 @@ var connection = new signalR
     .HubConnectionBuilder()
     .withUrl("https://localhost:5001/hubs/draw-hub")
     .withAutomaticReconnect()
-    .withHubProtocol(new signalRMsgPack.MessagePackHubProtocol())
     .build();
 
 function connect() {
