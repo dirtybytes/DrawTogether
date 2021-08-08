@@ -23,8 +23,11 @@ namespace DrawTogetherMvc
                 {
                     webBuilder.UseKestrel(kestrelOptions =>
                     {
-                        kestrelOptions.ConfigureHttpsDefaults(httpsOptions =>
-                            httpsOptions.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13);
+                        if (Environment.OSVersion.Platform == PlatformID.Win32NT && Environment.OSVersion.Version.Major == 7)
+                        {
+                            kestrelOptions.ConfigureHttpsDefaults(httpsOptions =>
+                                httpsOptions.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13);
+                        }
                     });
                     webBuilder.UseStartup<Startup>();
                 });

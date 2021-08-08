@@ -1,11 +1,7 @@
-using NUnit.Framework;
-using DrawTogetherMvc.Hubs;
-using Moq;
 using Microsoft.AspNetCore.SignalR;
-using System.Dynamic;
+using Moq;
+using NUnit.Framework;
 using System.Threading.Tasks;
-using System.Threading;
-using System.Threading.Channels;
 
 namespace DrawTogetherMvc.Hubs.Tests
 {

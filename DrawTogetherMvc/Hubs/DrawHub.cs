@@ -1,13 +1,12 @@
 using Microsoft.AspNetCore.SignalR;
+using SkiaSharp;
 using System;
-using System.Threading.Tasks;
-using System.Web;
-using System.Linq;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Text;
-using System.Threading.Channels;
+using System.Linq;
 using System.Threading;
+using System.Threading.Channels;
+using System.Threading.Tasks;
 
 namespace DrawTogetherMvc.Hubs
 {
@@ -37,27 +36,28 @@ namespace DrawTogetherMvc.Hubs
     /// </summary>
     public class RoomData
     {
-        /// <summary>
-        /// Indicates that the canvas image is currently being re-rendered by the server.<br/>
-        /// Redrawing == true implies that TrimDrawData() has already been called, but hasn't finished processing yet.
-        /// </summary>
-        public bool Redrawing { get; set; } = false;
         public RoomData(string id)
         {
             RoomId = id;
+            ImageInfo = new SKImageInfo(800, 600);
+            Image = SKImage.Create(new SKImageInfo(800, 600));
+            Surface = SKSurface.Create(ImageInfo);
+            Paint = new SKPaint
+            {
+                IsAntialias = true,
+                Color = new SKColor(0, 0, 0, 255),
+                StrokeWidth = 4,
+                PathEffect = SKPathEffect.CreateCorner(50),
+                Style = SKPaintStyle.Stroke
+            };
+            Path = new SKPath();
         }
         public string RoomId { get; }
-        /// <summary>
-        /// Data URI image data
-        /// </summary>
-        public string Image { get; set; } = "";
-        public ConcurrentQueue<DrawLineEvent> DrawEvents { get; }
-            = new ConcurrentQueue<DrawLineEvent>();
-        /// <summary>
-        /// Specifies the number of events that need to be removed from the DrawEvents queue.<br/>
-        /// Events are removed after being rendered onto an image, following the image update.
-        /// </summary>
-        public int EventsToTrim = 0;
+        public SKImageInfo ImageInfo { get; set; }
+        public SKSurface Surface { get; set; }
+        public SKImage Image { get; set; }
+        public SKPaint Paint { get; set; }
+        public SKPath Path { get; set; }
     }
     /// <summary>
     /// A class for storing information about a connection, including the channel for sending data about drawing events to the client.
@@ -73,6 +73,7 @@ namespace DrawTogetherMvc.Hubs
         /// <summary>
         /// A stream of drawing events for the client to process.
         /// </summary>
+        // TODO: make bounded
         public Channel<DrawLineEvent> DrawEvents { get; }
             = Channel.CreateUnbounded<DrawLineEvent>();
     }
@@ -82,14 +83,6 @@ namespace DrawTogetherMvc.Hubs
     public interface IDrawClient
     {
         Task ReceiveChatMessage(string user, string message);
-        /// <summary>
-        /// Sends the pre-rendered image data to the client to use as the initial canvas image.
-        /// </summary>
-        Task ReloadImage(string imageData);
-        /// <summary>
-        /// Sends a request to the node.js worker to re-render the room image data.
-        /// </summary>
-        Task NodeRenderImage(string room);
     }
     /// <summary>
     /// SignalR hub facilitating the realtime communication between all clients and the server.<br/>
@@ -98,14 +91,6 @@ namespace DrawTogetherMvc.Hubs
     public class DrawHub : Hub<IDrawClient>
     {
         #region Static hub methods and properties.
-        /// <summary>
-        /// The rate at which an image is redrawn server-side.
-        /// </summary>
-        private static int _imageRefreshRate = 2000;
-        /// <summary>
-        /// ConnectionId of the node.js worker that renders room images server-side.
-        /// </summary>
-        private static string _nodeWorkerID;
         private static ConcurrentDictionary<string, RoomData> _roomData
             = new ConcurrentDictionary<string, RoomData>();
         private static ConcurrentDictionary<string, ConnectionData> _connectionData
@@ -145,12 +130,27 @@ namespace DrawTogetherMvc.Hubs
             }
             return _roomToConnections[room];
         }
+        protected static void RedrawRoomImage(RoomData roomData)
+        {
+            roomData.Surface.Canvas.DrawImage(roomData.Image, 0, 0);
+            roomData.Surface.Canvas.DrawPath(roomData.Path, roomData.Paint);
+            roomData.Path.Reset();
+            roomData.Image.Dispose();
+            roomData.Image = roomData.Surface.Snapshot();
+            roomData.Surface.Flush();
+        }
         /// <summary>
         /// Sends the drawing event data to all users connected to the room.
         /// </summary>
         public static async Task AddDrawLineEvent(DrawLineEvent ev, string room)
         {
-            Room(room).DrawEvents.Enqueue(ev);
+            // TODO: probably easier to just enqueue the event, then redraw later, locking the image data to avoid race conditions
+            var roomData = Room(room);
+            var path = roomData.Path;
+            path.MoveTo(ev.From.X, ev.From.Y);
+            path.LineTo(ev.To.X, ev.To.Y);
+            RedrawRoomImage(roomData);
+
             foreach (var connectionId in _roomToConnections[room])
             {
                 await Connection(connectionId).DrawEvents.Writer.WriteAsync(ev);
@@ -187,15 +187,6 @@ namespace DrawTogetherMvc.Hubs
         {
             var room = ConnectionRoom;
             await AddDrawLineEvent(ev, room);
-            var roomData = Room(room);
-            // check if we should re-render the stored image for the room
-            var storedEventsCount = roomData.DrawEvents.Count;
-            if (!roomData.Redrawing && storedEventsCount > _imageRefreshRate)
-            {
-                roomData.Redrawing = true;
-                roomData.EventsToTrim += storedEventsCount;
-                _ = Clients.Client(_nodeWorkerID).NodeRenderImage(room);
-            }
         }
         /// <summary>
         /// A method called by a client when it wants to send a chat message.
@@ -214,83 +205,12 @@ namespace DrawTogetherMvc.Hubs
             return "Server message received";
         }
         /// <summary>
-        /// A method called by the node.js worker to establish communication with the server.
-        /// </summary>
-        public string NodeEstablishConnection()
-        {
-            _nodeWorkerID = Context.ConnectionId;
-            return "Success";
-        }
-        /// <summary>
-        /// A method called by the node.js worker to retrieve drawing events that need to be rendered onto the canvas.
-        /// </summary>
-        public async Task<ChannelReader<DrawLineEvent>> RequestDrawEvents(string room, CancellationToken cancellationToken)
-        {
-            var roomData = Room(room);
-            // TODO: this might never finish if the node disconnects
-            await Clients.Client(_nodeWorkerID).ReloadImage(roomData.Image);
-            var channel = Channel.CreateUnbounded<DrawLineEvent>();
-            var events = roomData.DrawEvents.GetEnumerator();
-            for (int i = 0; i < _imageRefreshRate; ++i)
-            {
-                if (events.MoveNext())
-                {
-                    await channel.Writer.WriteAsync(events.Current);
-                }
-            }
-            channel.Writer.Complete();
-            return channel.Reader;
-        }
-        /// <summary>
-        /// A method called by the node.js worker to send back the updated room image data.
-        /// </summary>
-        public async Task ReceiveUpdatedImage(string room, IAsyncEnumerable<string> imageData)
-        {
-            var roomData = Room(room);
-            var builder = new StringBuilder();
-            await foreach (var s in imageData)
-            {
-                builder.Append(s);
-            }
-            // TODO: maybe put a query string on the image to prevent caching
-            //      (sometimes you have to refresh a page multiple times)
-            roomData.Image = builder.ToString();
-            TrimDrawData(room);
-        }
-        /// <summary>
-        /// Removes the room drawing events that have already been rendered onto the image.
-        /// </summary>
-        private void TrimDrawData(string room)
-        {
-            var roomData = Room(room);
-            var amount = roomData.EventsToTrim;
-            int trimmed = 0;
-            for (int i = 0; i < amount; ++i)
-            {
-                if (!roomData.DrawEvents.TryDequeue(out _))
-                {
-                    break;
-                }
-                ++trimmed;
-            }
-            roomData.EventsToTrim -= trimmed;
-            roomData.Redrawing = false;
-        }
-        /// <summary>
         /// A method that handles disconnecting clients and removes data associated with those connections.
         /// </summary>
         public override Task OnDisconnectedAsync(Exception exception)
         {
             var connectionId = Context.ConnectionId;
-            if (connectionId == _nodeWorkerID)
-            {
-                Console.WriteLine("Node worker disconnected.");
-                _nodeWorkerID = null;
-            }
-            else
-            {
-                RemoveConnection(connectionId);
-            }
+            RemoveConnection(connectionId);
             return base.OnDisconnectedAsync(exception);
         }
         /// <summary>
@@ -302,18 +222,13 @@ namespace DrawTogetherMvc.Hubs
             var connection = AddConnection(Context.ConnectionId, room);
             connection.Room = room;
             await Groups.AddToGroupAsync(Context.ConnectionId, room);
-            var roomData = Room(room);
-            foreach (var ev in roomData.DrawEvents)
-            {
-                await connection.DrawEvents.Writer.WriteAsync(ev);
-            }
         }
         /// <summary>
         /// Called by a client after it's successfully synchronized an image.
         /// Returns a stream where DrawLineEvents are pushed in.
         /// </summary>
         /// <returns>Readable stream of drawing events to process client-side.</returns>
-        public ChannelReader<DrawLineEvent> ClientBeginReceiveEvents(CancellationToken cancellationToken)
+        public ChannelReader<DrawLineEvent> ClientBeginReceiveEvents()
         {
             return Connection(Context.ConnectionId).DrawEvents.Reader;
         }
@@ -322,15 +237,16 @@ namespace DrawTogetherMvc.Hubs
         /// </summary>
         /// <param name="roomId">Room identifier</param>
         /// <returns></returns>
-        public async IAsyncEnumerable<string> SendImageToClient(string roomId)
+        public async IAsyncEnumerable<byte[]> SendImageToClient(string roomId)
         {
-            var image = Room(roomId).Image;
+            var image = Room(roomId).Image.ToRasterImage().Encode(SKEncodedImageFormat.Png, 100);
             int chunkSize = 5000;
             var imageChunks =
                 Enumerable
-                .Range(0, (image.Length - 1) / chunkSize + 1)
-                .Select(i =>
-                    image.Substring(i * chunkSize, Math.Min(chunkSize, image.Length - i * chunkSize)));
+                .Range(0, (int)(image.Size - 1) / chunkSize + 1)
+                .Select(i => {
+                    return image.AsSpan().Slice(i * chunkSize, Math.Min(chunkSize, (int)image.Size - i * chunkSize)).ToArray();
+                    });
             foreach (var s in imageChunks)
             {
                 await Task.Yield();

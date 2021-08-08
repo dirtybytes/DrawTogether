@@ -1,7 +1,13 @@
 "use strict";
 
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+let canvas;
+let CanvasKit;
+let surface;
+let paint;
+let snapshot;
+let path;
+let redrawRequested = false;
+
 const roomID = roomModel.roomID;
 var drawing = false; // whether to draw on mouse move
 var lastX; //
@@ -60,11 +66,21 @@ function sendDrawLine(ev) {
     });
 }
 
+function drawFrame(canvas) {
+    if (path.countPoints() > 0 || redrawRequested) {
+        redrawRequested = false;
+        canvas.drawImage(snapshot, 0, 0, null);
+        canvas.drawPath(path, paint);
+        snapshot.delete();
+        snapshot = surface.makeImageSnapshot();
+        path.reset();
+    }
+    surface.requestAnimationFrame(drawFrame);
+}
+
 function drawLine(event) {
-    ctx.beginPath();
-    ctx.moveTo(event.From.X, event.From.Y);
-    ctx.lineTo(event.To.X, event.To.Y);
-    ctx.stroke();
+    path.moveTo(event.From.X, event.From.Y);
+    path.lineTo(event.To.X, event.To.Y);
 }
 
 // chat-related functions
@@ -94,9 +110,9 @@ function addChatMessage(user, message) {
 // called by the server as a part of establishing connection
 // sets the canvas image to the most recent version cached by the server
 function reloadImage(imageData) {
-    var image = document.getElementById("img-helper");
-    image.src = imageData;
-    document.getElementById("canvas").getContext("2d").drawImage(image, 0, 0);
+    snapshot.delete();
+    snapshot = CanvasKit.MakeImageFromEncoded(imageData);
+    redrawRequested = true;
     console.log("Succesfully resynchronized.");
 }
 
@@ -126,11 +142,15 @@ async function connect() {
     connection
         .stream("SendImageToClient", roomID)
         .subscribe({
-            next: (event) => {
-                data.push(event);
+            next: (chunk) => {
+                let decodedChunk = Uint8Array.from(atob(chunk), c => c.charCodeAt(0));
+                data.push(decodedChunk);
             },
             complete: () => {
-                reloadImage(data.join(''));
+                var arrsSize = data.reduce((acc, el) => acc + el.length, 0);
+                var newArr = new Uint8Array(arrsSize);
+                data.reduce((acc, el) => { newArr.set(el, acc); return acc + el.length }, 0);
+                reloadImage(newArr);
                 beginReceiveEvents();
             },
             error: (err) => {
@@ -140,14 +160,35 @@ async function connect() {
 }
 
 connection.on("ReceiveChatMessage", receiveChatMessage);
-connection.on("ReloadImage", reloadImage);
 connection.onreconnected(connect);
+
 
 // start the connection
 connection.start().then(async function () {
+    CanvasKit = await CanvasKitInit({
+        locateFile: (file) => 'https://unpkg.com/canvaskit-wasm@0.28.0/bin/' + file
+    });
+    surface = CanvasKit.MakeCanvasSurface("canvas");
+    if (!surface) {
+        console.log('Could not make surface');
+        return;
+    }
+    paint = new CanvasKit.Paint();
+    paint.setAntiAlias(true);
+    paint.setColor(CanvasKit.Color(0, 0, 0, 1.0));
+    paint.setStyle(CanvasKit.PaintStyle.Stroke);
+    paint.setStrokeWidth(4.0);
+    paint.setPathEffect(CanvasKit.PathEffect.MakeCorner(50));
+
+    canvas = surface.getCanvas();
+    snapshot = surface.makeImageSnapshot();
+    path = new CanvasKit.Path();
+    surface.requestAnimationFrame(drawFrame);
+
     await connect();
-    canvas.onmousedown = onMouseDown;
-    canvas.onmouseup = onMouseUp;
-    canvas.onmousemove = onMouseMove;
-    canvas.onmouseleave = onMouseLeave;
-})
+
+    document.getElementById("canvas").onmousedown = onMouseDown;
+    document.getElementById("canvas").onmouseup = onMouseUp;
+    document.getElementById("canvas").onmousemove = onMouseMove;
+    document.getElementById("canvas").onmouseleave = onMouseLeave;
+});

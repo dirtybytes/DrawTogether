@@ -9,22 +9,6 @@
         "dist/browser/signalr.js",
         "dist/browser/signalr.min.js"
       ]
-    },
-    {
-      "library": "@microsoft/signalr-protocol-msgpack@latest",
-      "destination": "wwwroot/js/signalr",
-      "files": [
-        "dist/browser/signalr-protocol-msgpack.js",
-        "dist/browser/signalr-protocol-msgpack.min.js"
-      ]
-    },
-    {
-      "library": "msgpack5@latest",
-      "destination": "wwwroot/js/msgpack5",
-      "files": [
-        "dist/msgpack5.js",
-        "dist/msgpack5.min.js"
-      ]
     }
   ]
 }
